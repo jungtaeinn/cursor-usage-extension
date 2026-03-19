@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-ssr
+coverage
+*.log
+.DS_Store
+.turbo
+pnpm-lock.yaml
+apps/desktop-tauri/src-tauri/target
+apps/desktop-tauri/src-tauri/gen
+.idea

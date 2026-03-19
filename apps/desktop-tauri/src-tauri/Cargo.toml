@@ -1,0 +1,18 @@
+[package]
+name = "cursor-usage-extension"
+version = "1.0.0"
+description = "Cursor Usage Extension v1.0.0 by TAEINN"
+authors = ["TAEINN"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
