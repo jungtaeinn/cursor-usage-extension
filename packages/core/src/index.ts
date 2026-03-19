@@ -11,6 +11,7 @@ export * from "./sync/storage";
 export * from "./sync/syncService";
 
 export * from "./selectors";
+export * from "./mock/cursorMock";
 
 export * from "./utils/currency";
 export * from "./utils/time";

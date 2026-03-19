@@ -26,6 +26,7 @@ type KeyValidationState = {
 
 type ValidateApiKeyResponse = {
   ok: boolean;
+  mode?: "mock";
   status?: number;
   message?: string;
 };
@@ -67,6 +68,7 @@ const I18N = {
     apiKeyLabel: "Cursor API Key",
     validateButton: "인증하기",
     validating: "인증 중...",
+    mockHint: "테스트 모드: API Key에 `mock_demo`를 입력 후 저장하면 목업 사용량/비용이 표시됩니다.",
     myEmailLabel: "내 이메일",
     teamBudgetLabel: "팀 월예산 (USD)",
     personalThresholdLabel: "개인 임계치 (%)",
@@ -86,6 +88,7 @@ const I18N = {
     keyEmpty: "먼저 Cursor API Key를 입력해주세요.",
     keyChecking: "API Key 인증 중...",
     keyValid: "유효한 API Key입니다.",
+    keyMockMode: "목업 모드 키가 확인되었습니다. 실제 API 호출 없이 테스트 데이터가 로드됩니다.",
     keyInvalid: "API Key가 유효하지 않습니다. 값을 다시 확인해주세요.",
     keyNoEnterprise: "키는 인식되지만 Admin API 권한(Enterprise)이 없어 조회가 제한됩니다.",
     keyRateLimited: "요청이 많습니다. 잠시 후 다시 인증해주세요.",
@@ -136,6 +139,7 @@ const I18N = {
     apiKeyLabel: "Cursor API Key",
     validateButton: "Validate",
     validating: "Validating...",
+    mockHint: "Test mode: use `mock_demo` as API key, save, then mock usage/spend data will load.",
     myEmailLabel: "My Email",
     teamBudgetLabel: "Team Monthly Budget (USD)",
     personalThresholdLabel: "Personal Threshold (%)",
@@ -156,6 +160,7 @@ const I18N = {
     keyEmpty: "Please enter a Cursor API Key first.",
     keyChecking: "Validating API key...",
     keyValid: "This API key is valid.",
+    keyMockMode: "Mock mode key validated. Test data will load without real API calls.",
     keyInvalid: "This API key is invalid. Please check again.",
     keyNoEnterprise:
       "Key is recognized, but Admin API access is restricted without Enterprise permission.",
@@ -470,7 +475,7 @@ export function OptionsApp(): JSX.Element {
       if (result.ok) {
         setKeyValidation({
           tone: "success",
-          message: i18n.keyValid
+          message: result.mode === "mock" ? i18n.keyMockMode : i18n.keyValid
         });
         return;
       }
@@ -692,6 +697,7 @@ export function OptionsApp(): JSX.Element {
                         {validatingKey ? i18n.validating : i18n.validateButton}
                       </button>
                     </div>
+                    <p className="key-validation info">{i18n.mockHint}</p>
                     {keyValidation ? (
                       <p className={`key-validation ${keyValidation.tone}`}>{keyValidation.message}</p>
                     ) : null}

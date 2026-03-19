@@ -3,12 +3,18 @@ import { evaluateAlertTransitions, purgeOldCycleAlerts } from "../alerts/alertEn
 import { deliverAlerts, type NotifierDeliveryResult } from "../alerts/notifiers";
 import { CursorApiClient, CursorApiError } from "../api/cursorApi";
 import { FxApiClient } from "../api/fxApi";
+import {
+  createMockDailyUsageResponse,
+  createMockSpendResponse,
+  isMockApiKey
+} from "../mock/cursorMock";
 import { getUsageSummary } from "../selectors";
 import { now, shouldRefreshByInterval } from "../utils/time";
 import type {
   AppConfig,
   DailyUsageRequest,
   DailyUsageResponse,
+  SpendRequest,
   SpendResponse,
   StorageAdapter,
   SyncOptions,
@@ -28,6 +34,14 @@ type InFlightTask = {
   promise: Promise<SyncSnapshot>;
   controller: AbortController;
 };
+
+interface CursorSyncClient {
+  postSpend(payload?: SpendRequest, signal?: AbortSignal): Promise<SpendResponse>;
+  postDailyUsageData(
+    payload: DailyUsageRequest,
+    signal?: AbortSignal
+  ): Promise<DailyUsageResponse>;
+}
 
 export class SyncService implements SyncServiceContract {
   private readonly storage: StorageAdapter;
@@ -140,11 +154,19 @@ export class SyncService implements SyncServiceContract {
     this.listeners.clear();
   }
 
-  private createCursorClient(config: AppConfig): CursorApiClient {
-    if (!config.apiKey.trim()) {
+  private createCursorClient(config: AppConfig): CursorSyncClient {
+    const apiKey = config.apiKey.trim();
+    if (!apiKey) {
       throw new Error("Cursor API Key가 설정되지 않았습니다.");
     }
-    return new CursorApiClient(config.apiKey.trim(), {
+    if (isMockApiKey(apiKey)) {
+      return {
+        postSpend: async () => createMockSpendResponse(config.myEmail, now()),
+        postDailyUsageData: async () => createMockDailyUsageResponse(now())
+      };
+    }
+
+    return new CursorApiClient(apiKey, {
       fetchImpl: this.fetchImpl
     });
   }

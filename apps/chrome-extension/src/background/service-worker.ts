@@ -1,7 +1,9 @@
 import {
+  createMockSetUserSpendLimitResponse,
   CursorApiClient,
   CursorApiError,
   SyncService,
+  isMockApiKey,
   type SyncSnapshot
 } from "@cursor-usage/core";
 
@@ -125,6 +127,11 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, _sender, sendR
           return;
         }
 
+        if (isMockApiKey(apiKey)) {
+          sendResponse({ ok: true, mode: "mock" });
+          return;
+        }
+
         try {
           await new CursorApiClient(apiKey).postSpend({ page: 1, pageSize: 1 });
           sendResponse({ ok: true });
@@ -146,8 +153,9 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, _sender, sendR
       }
       case "set-user-spend-limit": {
         const config = await storage.getConfig();
-        const client = new CursorApiClient(config.apiKey);
-        const result = await client.setUserSpendLimit(message.payload);
+        const result = isMockApiKey(config.apiKey)
+          ? createMockSetUserSpendLimitResponse(message.payload)
+          : await new CursorApiClient(config.apiKey).setUserSpendLimit(message.payload);
         sendResponse(result);
         return;
       }
