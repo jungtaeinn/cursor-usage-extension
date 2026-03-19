@@ -1,6 +1,7 @@
 import type {
   DailyUsagePoint,
   DailyUsageResponse,
+  FilteredUsageEventsResponse,
   SetUserSpendLimitRequest,
   SetUserSpendLimitResponse,
   SpendMember,
@@ -144,6 +145,96 @@ export function createMockDailyUsageResponse(nowMs = Date.now()): DailyUsageResp
       page: 1,
       pageSize: 1000,
       totalUsers: 5,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPreviousPage: false
+    }
+  };
+}
+
+export function createMockFilteredUsageEventsResponse(nowMs = Date.now()): FilteredUsageEventsResponse {
+  const now = nowMs;
+  const sixHours = 6 * 60 * 60 * 1000;
+  const twelveHours = 12 * 60 * 60 * 1000;
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  const data = [
+    {
+      timestamp: now - 45 * 60 * 1000,
+      email: MOCK_EMAILS[0],
+      model: "gpt-5",
+      chargedCents: 124,
+      totalCents: 118,
+      cursorTokenFee: 6,
+      requestsCosts: 1.24,
+      inputTokens: 18400,
+      outputTokens: 4220,
+      cacheWriteTokens: 2300,
+      cacheReadTokens: 5400
+    },
+    {
+      timestamp: now - 2 * 60 * 60 * 1000,
+      email: MOCK_EMAILS[1],
+      model: "gpt-4.1",
+      chargedCents: 93,
+      totalCents: 90,
+      cursorTokenFee: 3,
+      requestsCosts: 0.93,
+      inputTokens: 13200,
+      outputTokens: 2980,
+      cacheWriteTokens: 1900,
+      cacheReadTokens: 4200
+    },
+    {
+      timestamp: now - sixHours,
+      email: MOCK_EMAILS[2],
+      model: "gpt-4.1",
+      chargedCents: 71,
+      totalCents: 71,
+      requestsCosts: 0.71,
+      inputTokens: 8400,
+      outputTokens: 1670,
+      cacheWriteTokens: 900,
+      cacheReadTokens: 2500
+    },
+    {
+      timestamp: now - twelveHours,
+      email: MOCK_EMAILS[3],
+      model: "claude-sonnet-4",
+      chargedCents: 66,
+      totalCents: 63,
+      cursorTokenFee: 3,
+      requestsCosts: 0.66,
+      inputTokens: 7900,
+      outputTokens: 1380,
+      cacheWriteTokens: 820,
+      cacheReadTokens: 1900
+    },
+    {
+      timestamp: now - oneDay - 2 * 60 * 60 * 1000,
+      email: MOCK_EMAILS[4],
+      model: "gpt-4.1-mini",
+      chargedCents: 22,
+      totalCents: 22,
+      requestsCosts: 0.22,
+      inputTokens: 2100,
+      outputTokens: 520,
+      cacheWriteTokens: 200,
+      cacheReadTokens: 600,
+      isFreeBugbot: false
+    }
+  ];
+
+  return {
+    data,
+    period: {
+      startDate: now - 30 * oneDay,
+      endDate: now
+    },
+    pagination: {
+      page: 1,
+      pageSize: 200,
+      totalCount: data.length,
       totalPages: 1,
       hasNextPage: false,
       hasPreviousPage: false

@@ -103,6 +103,11 @@ export interface UsageEvent {
   requestsCosts?: number;
   inputTokens?: number;
   outputTokens?: number;
+  cacheWriteTokens?: number;
+  cacheReadTokens?: number;
+  discountPercentOff?: number;
+  cursorTokenFee?: number;
+  isFreeBugbot?: boolean;
 }
 
 export interface FilteredUsageEventsResponse {

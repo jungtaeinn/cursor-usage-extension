@@ -115,7 +115,7 @@ body.page-popup #root {
 
 .options-shell {
   width: min(460px, 100%);
-  height: min(640px, calc(100vh - 24px));
+  height: min(600px, calc(100vh - 24px));
   border: 1px solid var(--line);
   background: var(--card);
   backdrop-filter: blur(18px);
@@ -524,7 +524,7 @@ body.page-popup #root {
 
 .key-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
   margin-bottom: 2px;
@@ -538,6 +538,16 @@ body.page-popup #root {
   height: 38px;
   padding: 0 12px;
   white-space: nowrap;
+}
+
+.key-visibility-btn {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .key-validation {
@@ -627,11 +637,18 @@ body.page-popup #root {
 
 .mini-mode-panel {
   display: grid;
-  gap: 5px;
+  gap: 7px;
   border: 1px solid color-mix(in srgb, var(--line), transparent 28%);
   background: color-mix(in srgb, var(--card-strong), transparent 6%);
   border-radius: 12px;
   padding: 9px 10px;
+}
+
+.mini-mode-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .mini-mode-title {
@@ -646,17 +663,69 @@ body.page-popup #root {
   color: color-mix(in srgb, var(--text-muted), transparent 16%);
 }
 
+.mini-remaining-chip {
+  align-self: flex-start;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line), transparent 18%);
+  background: color-mix(in srgb, var(--card-strong), transparent 4%);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 20px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.mini-remaining-chip.tone-muted {
+  border-color: color-mix(in srgb, var(--line), transparent 12%);
+  background: color-mix(in srgb, var(--card-strong), transparent 6%);
+  color: var(--text-muted);
+}
+
+.mini-remaining-chip.tone-blue {
+  border-color: color-mix(in srgb, #4aa3ff, transparent 42%);
+  background: color-mix(in srgb, #4aa3ff, transparent 84%);
+  color: #6cb6ff;
+}
+
+.mini-remaining-chip.tone-green {
+  border-color: color-mix(in srgb, #58dca4, transparent 44%);
+  background: color-mix(in srgb, #58dca4, transparent 84%);
+  color: #73e3b2;
+}
+
+.mini-remaining-chip.tone-orange {
+  border-color: color-mix(in srgb, #ffb454, transparent 40%);
+  background: color-mix(in srgb, #ffb454, transparent 83%);
+  color: #ffc271;
+}
+
+.mini-remaining-chip.tone-red {
+  border-color: color-mix(in srgb, #ff6d7a, transparent 38%);
+  background: color-mix(in srgb, #ff6d7a, transparent 82%);
+  color: #ff8c98;
+}
+
+.mini-mode-amount-wrap {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line), transparent 38%);
+  background: color-mix(in srgb, var(--card-strong), transparent 3%);
+  padding: 7px 9px;
+}
+
 .mini-mode-amount {
   margin: 0;
-  font-size: 15px;
+  font-size: 23px;
   font-weight: 700;
+  line-height: 1.12;
   letter-spacing: -0.01em;
 }
 
 .mini-progress-track {
   position: relative;
   width: 100%;
-  height: 10px;
+  height: 11px;
   border-radius: 999px;
   overflow: hidden;
   background: color-mix(in srgb, var(--ring-track), transparent 15%);
@@ -679,6 +748,10 @@ body.page-popup #root {
   color: var(--text-muted);
   font-size: 10px;
   white-space: nowrap;
+}
+
+.mini-progress-meta span {
+  font-weight: 600;
 }
 
 @media (max-width: 900px) {

@@ -9,7 +9,7 @@ use tauri::{
 const TOP_OFFSET: i32 = 12;
 const RIGHT_OFFSET: i32 = 14;
 const WINDOW_WIDTH: u32 = 430;
-const MAX_WINDOW_HEIGHT: u32 = 640;
+const MAX_WINDOW_HEIGHT: u32 = 600;
 const MINI_WINDOW_HEIGHT: u32 = 224;
 const MINI_WINDOW_HEIGHT_WITH_FEEDBACK: u32 = 264;
 

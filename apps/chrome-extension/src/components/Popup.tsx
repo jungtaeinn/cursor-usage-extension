@@ -18,6 +18,7 @@ type PopupState = {
 
 type UiLanguage = "ko" | "en";
 
+const APP_VERSION = "1.1.0";
 const UI_LANGUAGE_STORAGE_KEY = "cue_ui_language_chrome";
 
 const I18N = {
@@ -62,6 +63,24 @@ function clamp(value: number | null): number {
     return 0;
   }
   return Math.max(0, Math.min(100, value));
+}
+
+function getRemainingTone(
+  value: number | null
+): "tone-muted" | "tone-blue" | "tone-green" | "tone-orange" | "tone-red" {
+  if (value === null) {
+    return "tone-muted";
+  }
+  if (value >= 80) {
+    return "tone-blue";
+  }
+  if (value >= 60) {
+    return "tone-green";
+  }
+  if (value >= 20) {
+    return "tone-orange";
+  }
+  return "tone-red";
 }
 
 function sendMessage<T>(message: BackgroundMessage): Promise<T> {
@@ -144,6 +163,7 @@ export function Popup(): JSX.Element {
   const myPercent = percent(summary.mySpendUsd, summary.myLimitUsd);
   const safeMyPercent = clamp(myPercent);
   const remainingMyPercent = myPercent === null ? null : Math.max(0, 100 - myPercent);
+  const remainingToneClass = getRemainingTone(remainingMyPercent);
   const remainingMyUsd =
     summary.myLimitUsd !== null && summary.mySpendUsd !== null
       ? Math.max(0, summary.myLimitUsd - summary.mySpendUsd)
@@ -174,7 +194,7 @@ export function Popup(): JSX.Element {
           <img src={chrome.runtime.getURL("icons/cursor-48.png")} alt="Cursor" />
           <div>
             <h1>Cursor Usage</h1>
-            <p>v1.0.0 by TAEINN</p>
+            <p>{`v${APP_VERSION} by TAEINN`}</p>
           </div>
         </div>
         <button className="mini-btn" onClick={onManualSync} disabled={syncing}>
@@ -187,13 +207,22 @@ export function Popup(): JSX.Element {
           <p className="muted">{i18n.loading}</p>
         ) : (
           <section className="mini-mode-panel">
-            <p className="mini-mode-title">{i18n.title}</p>
-            <p className="mini-mode-subtitle">{i18n.subtitle}</p>
-            <p className="mini-mode-amount">
-              {remainingMyUsd === null
-                ? i18n.noData
-                : formatUsdWithApproxKrw(remainingMyUsd, state.snapshot.fxRate?.usdToKrw ?? null)}
-            </p>
+            <div className="mini-mode-head">
+              <div>
+                <p className="mini-mode-title">{i18n.title}</p>
+                <p className="mini-mode-subtitle">{i18n.subtitle}</p>
+              </div>
+              <span className={`mini-remaining-chip ${remainingToneClass}`}>
+                {remainingMyPercent === null ? "-" : `${remainingMyPercent.toFixed(0)}%`} {i18n.remaining}
+              </span>
+            </div>
+            <div className="mini-mode-amount-wrap">
+              <p className="mini-mode-amount">
+                {remainingMyUsd === null
+                  ? i18n.noData
+                  : formatUsdWithApproxKrw(remainingMyUsd, state.snapshot.fxRate?.usdToKrw ?? null)}
+              </p>
+            </div>
             <div
               className="mini-progress-track"
               role="progressbar"
@@ -209,9 +238,6 @@ export function Popup(): JSX.Element {
                 {summary.mySpendUsd === null
                   ? "-"
                   : formatUsdWithApproxKrw(summary.mySpendUsd, state.snapshot.fxRate?.usdToKrw ?? null)}
-              </span>
-              <span>
-                {i18n.remaining}: {remainingMyPercent === null ? "-" : `${remainingMyPercent.toFixed(0)}%`}
               </span>
             </div>
           </section>

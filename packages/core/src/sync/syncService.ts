@@ -4,6 +4,7 @@ import { deliverAlerts, type NotifierDeliveryResult } from "../alerts/notifiers"
 import { CursorApiClient, CursorApiError } from "../api/cursorApi";
 import { FxApiClient } from "../api/fxApi";
 import {
+  createMockFilteredUsageEventsResponse,
   createMockDailyUsageResponse,
   createMockSpendResponse,
   isMockApiKey
@@ -14,6 +15,7 @@ import type {
   AppConfig,
   DailyUsageRequest,
   DailyUsageResponse,
+  FilteredUsageEventsResponse,
   SpendRequest,
   SpendResponse,
   StorageAdapter,
@@ -41,6 +43,10 @@ interface CursorSyncClient {
     payload: DailyUsageRequest,
     signal?: AbortSignal
   ): Promise<DailyUsageResponse>;
+  postFilteredUsageEvents?(
+    payload: { startDate: number; endDate: number; page?: number; pageSize?: number },
+    signal?: AbortSignal
+  ): Promise<FilteredUsageEventsResponse>;
 }
 
 export class SyncService implements SyncServiceContract {
@@ -87,14 +93,51 @@ export class SyncService implements SyncServiceContract {
       let snapshot = await this.getSnapshot();
       const client = this.createCursorClient(config);
       const range = this.resolveDateRange(snapshot.spend);
-      const request: DailyUsageRequest = {
+      const dailyUsageRequest: DailyUsageRequest = {
         startDate: range.startDate,
         endDate: range.endDate,
         page: 1,
         pageSize: 1000
       };
-      const dailyUsage = await client.postDailyUsageData(request, controller.signal);
-      snapshot = this.applyDailyUsageSuccess(snapshot, dailyUsage, source);
+      const usageEventsRequest = {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        page: 1,
+        pageSize: 200
+      };
+      const usageEventsPromise =
+        typeof client.postFilteredUsageEvents === "function"
+          ? client.postFilteredUsageEvents(usageEventsRequest, controller.signal)
+          : null;
+
+      let dailyResult: PromiseSettledResult<DailyUsageResponse>;
+      let usageEventsResult: PromiseSettledResult<FilteredUsageEventsResponse> | null = null;
+
+      if (usageEventsPromise) {
+        [dailyResult, usageEventsResult] = await Promise.allSettled([
+          client.postDailyUsageData(dailyUsageRequest, controller.signal),
+          usageEventsPromise
+        ]);
+      } else {
+        [dailyResult] = await Promise.allSettled([
+          client.postDailyUsageData(dailyUsageRequest, controller.signal)
+        ]);
+      }
+
+      if (dailyResult.status === "fulfilled") {
+        snapshot = this.applyDailyUsageSuccess(snapshot, dailyResult.value, source);
+      } else {
+        snapshot = this.applyEndpointError(snapshot, "dailyUsage", dailyResult.reason, source);
+      }
+
+      if (usageEventsResult && usageEventsResult.status === "fulfilled") {
+        snapshot = this.applyUsageEventsSuccess(snapshot, usageEventsResult.value, source);
+      } else if (usageEventsResult && usageEventsResult.status === "rejected") {
+        snapshot = this.applyEndpointError(snapshot, "usageEvents", usageEventsResult.reason, source);
+      } else {
+        snapshot.stale.usageEvents = true;
+      }
+
       await this.persistSnapshot(snapshot);
       return snapshot;
     });
@@ -102,7 +145,7 @@ export class SyncService implements SyncServiceContract {
 
   async syncAll(options: Partial<SyncOptions> = {}): Promise<SyncSnapshot> {
     const source = options.source ?? (options.manual ? "manual" : "background");
-    const includeUsageEvents = options.includeUsageEvents ?? false;
+    const includeUsageEvents = options.includeUsageEvents ?? true;
 
     return this.dedupe("syncAll", async (controller) => {
       const config = await this.storage.getConfig();
@@ -119,7 +162,31 @@ export class SyncService implements SyncServiceContract {
         controller.signal
       );
 
-      const [spendResult, dailyResult] = await Promise.allSettled([spendPromise, dailyPromise]);
+      const usageEventsPromise =
+        includeUsageEvents && typeof client.postFilteredUsageEvents === "function"
+          ? client.postFilteredUsageEvents(
+              {
+                ...this.resolveDateRange(snapshot.spend),
+                page: 1,
+                pageSize: 200
+              },
+              controller.signal
+            )
+          : null;
+
+      let spendResult: PromiseSettledResult<SpendResponse>;
+      let dailyResult: PromiseSettledResult<DailyUsageResponse>;
+      let usageEventsResult: PromiseSettledResult<FilteredUsageEventsResponse> | null = null;
+
+      if (usageEventsPromise) {
+        [spendResult, dailyResult, usageEventsResult] = await Promise.allSettled([
+          spendPromise,
+          dailyPromise,
+          usageEventsPromise
+        ]);
+      } else {
+        [spendResult, dailyResult] = await Promise.allSettled([spendPromise, dailyPromise]);
+      }
 
       if (spendResult.status === "fulfilled") {
         snapshot = this.applySpendSuccess(snapshot, spendResult.value, source);
@@ -133,8 +200,11 @@ export class SyncService implements SyncServiceContract {
         snapshot = this.applyEndpointError(snapshot, "dailyUsage", dailyResult.reason, source);
       }
 
-      if (includeUsageEvents) {
-        // v1에서는 사용 이벤트를 optional 데이터로 유지한다.
+      if (usageEventsResult && usageEventsResult.status === "fulfilled") {
+        snapshot = this.applyUsageEventsSuccess(snapshot, usageEventsResult.value, source);
+      } else if (usageEventsResult && usageEventsResult.status === "rejected") {
+        snapshot = this.applyEndpointError(snapshot, "usageEvents", usageEventsResult.reason, source);
+      } else if (!includeUsageEvents) {
         snapshot.stale.usageEvents = true;
       }
 
@@ -162,7 +232,8 @@ export class SyncService implements SyncServiceContract {
     if (isMockApiKey(apiKey)) {
       return {
         postSpend: async () => createMockSpendResponse(config.myEmail, now()),
-        postDailyUsageData: async () => createMockDailyUsageResponse(now())
+        postDailyUsageData: async () => createMockDailyUsageResponse(now()),
+        postFilteredUsageEvents: async () => createMockFilteredUsageEventsResponse(now())
       };
     }
 
@@ -218,6 +289,27 @@ export class SyncService implements SyncServiceContract {
       errors: {
         ...previous.errors,
         dailyUsage: undefined
+      }
+    };
+  }
+
+  private applyUsageEventsSuccess(
+    previous: SyncSnapshot,
+    usageEvents: FilteredUsageEventsResponse,
+    source: SyncSource
+  ): SyncSnapshot {
+    return {
+      ...previous,
+      usageEvents,
+      lastSyncAt: now(),
+      source,
+      stale: {
+        ...previous.stale,
+        usageEvents: false
+      },
+      errors: {
+        ...previous.errors,
+        usageEvents: undefined
       }
     };
   }

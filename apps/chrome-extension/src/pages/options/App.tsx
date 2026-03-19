@@ -4,6 +4,7 @@ import {
   EMPTY_SNAPSHOT,
   formatUsdWithApproxKrw,
   getUsageSummary,
+  isMockApiKey,
   percent,
   type AppConfig,
   type SetUserSpendLimitRequest,
@@ -33,6 +34,7 @@ type ValidateApiKeyResponse = {
 
 const UI_LANGUAGE_STORAGE_KEY = "cue_ui_language_chrome";
 const TABS: OptionsTabKey[] = ["overview", "team", "settings"];
+const APP_VERSION = "1.1.0";
 
 const I18N = {
   ko: {
@@ -54,8 +56,14 @@ const I18N = {
     limitApplyFailed: "사용자 한도 적용 실패",
     myUsage: "개인 사용률",
     teamUsage: "팀 사용률",
+    myUsagePair: "개인 사용/한도",
+    teamUsagePair: "팀 사용/예산",
     myNoData: "개인 데이터 없음",
     teamNoData: "팀 데이터 없음",
+    usageEvents24h: "최근 24시간 Usage Events",
+    usageEventsNoData: "Usage Events 데이터 없음",
+    usageEventsCount: "이벤트 수",
+    usageEventsTokens: "토큰 (입력/출력)",
     myLimit: "개인 한도",
     teamBudget: "팀 예산",
     teamNoRows: "팀 데이터가 없습니다.",
@@ -68,6 +76,8 @@ const I18N = {
     apiKeyLabel: "Cursor API Key",
     validateButton: "인증하기",
     validating: "인증 중...",
+    showApiKey: "API Key 보기",
+    hideApiKey: "API Key 숨기기",
     mockHint: "테스트 모드: API Key에 `mock_demo`를 입력 후 저장하면 목업 사용량/비용이 표시됩니다.",
     myEmailLabel: "내 이메일",
     teamBudgetLabel: "팀 월예산 (USD)",
@@ -125,8 +135,14 @@ const I18N = {
     limitApplyFailed: "Failed to apply user spend limit",
     myUsage: "My Usage",
     teamUsage: "Team Usage",
+    myUsagePair: "My Spend / Limit",
+    teamUsagePair: "Team Spend / Budget",
     myNoData: "No personal data",
     teamNoData: "No team data",
+    usageEvents24h: "Usage Events (24h)",
+    usageEventsNoData: "No usage events data",
+    usageEventsCount: "Events",
+    usageEventsTokens: "Tokens (in/out)",
     myLimit: "My Limit",
     teamBudget: "Team Budget",
     teamNoRows: "No team data available.",
@@ -139,6 +155,8 @@ const I18N = {
     apiKeyLabel: "Cursor API Key",
     validateButton: "Validate",
     validating: "Validating...",
+    showApiKey: "Show API key",
+    hideApiKey: "Hide API key",
     mockHint: "Test mode: use `mock_demo` as API key, save, then mock usage/spend data will load.",
     myEmailLabel: "My Email",
     teamBudgetLabel: "Team Monthly Budget (USD)",
@@ -258,6 +276,18 @@ function isConfigEqual(a: AppConfig, b: AppConfig): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function applyMockDefaults(config: AppConfig): AppConfig {
+  if (!isMockApiKey(config.apiKey)) {
+    return config;
+  }
+
+  return {
+    ...config,
+    myEmail: config.myEmail.trim() ? config.myEmail : "taeinn@company.com",
+    teamBudgetUsd: config.teamBudgetUsd ?? 1200
+  };
+}
+
 function RingGauge(props: {
   label: string;
   percent: number | null;
@@ -291,6 +321,37 @@ function RingGauge(props: {
   );
 }
 
+function VisibilityIcon(props: { masked: boolean }): JSX.Element {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M2 12C4.7 7.8 8 6 12 6C16 6 19.3 7.8 22 12C19.3 16.2 16 18 12 18C8 18 4.7 16.2 2 12Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+      {props.masked ? null : (
+        <path
+          d="M4 4L20 20"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
+  );
+}
+
 export function OptionsApp(): JSX.Element {
   const [tab, setTab] = useState<OptionsTabKey>("overview");
   const [language, setLanguage] = useState<UiLanguage>(() => getInitialLanguage());
@@ -302,6 +363,7 @@ export function OptionsApp(): JSX.Element {
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [validatingKey, setValidatingKey] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [keyValidation, setKeyValidation] = useState<KeyValidationState | null>(null);
   const [adminEmail, setAdminEmail] = useState("");
   const [adminLimit, setAdminLimit] = useState("");
@@ -387,6 +449,25 @@ export function OptionsApp(): JSX.Element {
       }));
   }, [snapshot.spend]);
 
+  const usageEvents24h = useMemo(() => {
+    const rows = snapshot.usageEvents?.data ?? [];
+    if (rows.length === 0) {
+      return null;
+    }
+    const windowStart = Date.now() - 24 * 60 * 60 * 1000;
+    const recent = rows.filter((row) => row.timestamp >= windowStart);
+    const target = recent.length > 0 ? recent : rows;
+    const chargedUsd = target.reduce((acc, row) => acc + row.chargedCents, 0) / 100;
+    const inputTokens = target.reduce((acc, row) => acc + (row.inputTokens ?? 0), 0);
+    const outputTokens = target.reduce((acc, row) => acc + (row.outputTokens ?? 0), 0);
+    return {
+      eventCount: target.length,
+      chargedUsd,
+      inputTokens,
+      outputTokens
+    };
+  }, [snapshot.usageEvents]);
+
   const tabIndex = Math.max(0, TABS.findIndex((item) => item === tab));
 
   const onManualSync = async () => {
@@ -406,10 +487,14 @@ export function OptionsApp(): JSX.Element {
   const onSaveConfig = async () => {
     setSaving(true);
     setFeedback(null);
+    const nextDraft = applyMockDefaults(draft);
+    if (!isConfigEqual(nextDraft, draft)) {
+      setDraft(nextDraft);
+    }
     try {
       const payload = await sendMessage<StateMessagePayload>({
         type: "save-config",
-        payload: draft
+        payload: nextDraft
       });
       setConfig(payload.config);
       setDraft(payload.config);
@@ -542,7 +627,7 @@ export function OptionsApp(): JSX.Element {
             <img src={chrome.runtime.getURL("icons/cursor-48.png")} alt="Cursor" />
             <div>
               <h1>Cursor Usage</h1>
-              <p>v1.0.0 by TAEINN</p>
+              <p>{`v${APP_VERSION} by TAEINN`}</p>
             </div>
           </div>
           <div className="header-actions">
@@ -594,9 +679,9 @@ export function OptionsApp(): JSX.Element {
                   percent={myPercent}
                   tone="primary"
                   subtitle={
-                    summary.mySpendUsd === null
+                    summary.mySpendUsd === null || summary.myLimitUsd === null
                       ? i18n.myNoData
-                      : formatUsdWithApproxKrw(summary.mySpendUsd, snapshot.fxRate?.usdToKrw ?? null)
+                      : `${formatUsdWithApproxKrw(summary.mySpendUsd, snapshot.fxRate?.usdToKrw ?? null)} / ${formatUsdWithApproxKrw(summary.myLimitUsd, snapshot.fxRate?.usdToKrw ?? null)}`
                   }
                 />
                 <RingGauge
@@ -604,28 +689,31 @@ export function OptionsApp(): JSX.Element {
                   percent={teamPercent}
                   tone="success"
                   subtitle={
-                    summary.teamSpendUsd === null
+                    summary.teamSpendUsd === null || summary.teamBudgetUsd === null
                       ? i18n.teamNoData
-                      : formatUsdWithApproxKrw(summary.teamSpendUsd, snapshot.fxRate?.usdToKrw ?? null)
+                      : `${formatUsdWithApproxKrw(summary.teamSpendUsd, snapshot.fxRate?.usdToKrw ?? null)} / ${formatUsdWithApproxKrw(summary.teamBudgetUsd, snapshot.fxRate?.usdToKrw ?? null)}`
                   }
                 />
               </div>
 
               <div className="mini-metrics">
                 <div>
-                  <strong>{i18n.myLimit}</strong>
+                  <strong>{i18n.usageEvents24h}</strong>
                   <p>
-                    {summary.myLimitUsd === null
-                      ? "-"
-                      : formatUsdWithApproxKrw(summary.myLimitUsd, snapshot.fxRate?.usdToKrw ?? null)}
+                    {usageEvents24h
+                      ? formatUsdWithApproxKrw(usageEvents24h.chargedUsd, snapshot.fxRate?.usdToKrw ?? null)
+                      : i18n.usageEventsNoData}
                   </p>
+                  <span className="muted">
+                    {i18n.usageEventsCount}: {usageEvents24h ? usageEvents24h.eventCount.toLocaleString() : "-"}
+                  </span>
                 </div>
                 <div>
-                  <strong>{i18n.teamBudget}</strong>
+                  <strong>{i18n.usageEventsTokens}</strong>
                   <p>
-                    {summary.teamBudgetUsd === null
-                      ? "-"
-                      : formatUsdWithApproxKrw(summary.teamBudgetUsd, snapshot.fxRate?.usdToKrw ?? null)}
+                    {usageEvents24h
+                      ? `${usageEvents24h.inputTokens.toLocaleString()} / ${usageEvents24h.outputTokens.toLocaleString()}`
+                      : "-"}
                   </p>
                 </div>
               </div>
@@ -681,7 +769,7 @@ export function OptionsApp(): JSX.Element {
                     <label>{i18n.apiKeyLabel}</label>
                     <div className="key-input-row">
                       <input
-                        type="password"
+                        type={showApiKey ? "text" : "password"}
                         value={draft.apiKey}
                         placeholder={i18n.apiKeyPlaceholder}
                         onChange={(event) => {
@@ -689,6 +777,14 @@ export function OptionsApp(): JSX.Element {
                           setKeyValidation(null);
                         }}
                       />
+                      <button
+                        className="mini-btn key-visibility-btn"
+                        onClick={() => setShowApiKey((prev) => !prev)}
+                        aria-label={showApiKey ? i18n.hideApiKey : i18n.showApiKey}
+                        title={showApiKey ? i18n.hideApiKey : i18n.showApiKey}
+                      >
+                        <VisibilityIcon masked={!showApiKey} />
+                      </button>
                       <button
                         className="mini-btn key-verify-btn"
                         onClick={onValidateApiKey}
