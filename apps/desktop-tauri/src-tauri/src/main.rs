@@ -7,7 +7,7 @@ use tauri::{
 };
 
 const TOP_OFFSET: i32 = 12;
-const RIGHT_OFFSET: i32 = 14;
+const HORIZONTAL_MARGIN: i32 = 12;
 const WINDOW_WIDTH: u32 = 430;
 const MAX_WINDOW_HEIGHT: u32 = 600;
 const MINI_WINDOW_HEIGHT: u32 = 224;
@@ -16,7 +16,10 @@ const MINI_WINDOW_HEIGHT_WITH_FEEDBACK: u32 = 264;
 fn position_window_top_right(window: &WebviewWindow) {
   let monitor = match window.current_monitor() {
     Ok(Some(value)) => value,
-    _ => return,
+    _ => match window.primary_monitor() {
+      Ok(Some(value)) => value,
+      _ => return,
+    },
   };
   let size = match window.outer_size() {
     Ok(value) => value,
@@ -25,7 +28,10 @@ fn position_window_top_right(window: &WebviewWindow) {
 
   // Use work area to avoid overlapping macOS menu bar / dock.
   let work_area = monitor.work_area();
-  let x = work_area.position.x + work_area.size.width as i32 - size.width as i32 - RIGHT_OFFSET;
+  // Keep the window inside work area so it never overlaps menu bar / dock area.
+  let min_x = work_area.position.x + HORIZONTAL_MARGIN;
+  let max_x = work_area.position.x + work_area.size.width as i32 - size.width as i32 - HORIZONTAL_MARGIN;
+  let x = max_x.max(min_x);
   let y = work_area.position.y + TOP_OFFSET;
 
   let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
@@ -33,6 +39,7 @@ fn position_window_top_right(window: &WebviewWindow) {
 
 fn show_main_window(app: &AppHandle) {
   if let Some(window) = app.get_webview_window("main") {
+    position_window_top_right(&window);
     let _ = window.show();
     let _ = window.set_focus();
   }
@@ -45,6 +52,7 @@ fn toggle_main_window(app: &AppHandle) {
       let _ = window.hide();
       return;
     }
+    position_window_top_right(&window);
     let _ = window.show();
     let _ = window.set_focus();
   }
@@ -68,7 +76,9 @@ fn set_window_mode(app: AppHandle, mode: String, height: Option<u32>) -> Result<
       WINDOW_WIDTH as f64,
       target_height as f64,
     )))
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+  position_window_top_right(&window);
+  Ok(())
 }
 
 #[tauri::command]

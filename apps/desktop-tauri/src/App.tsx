@@ -696,12 +696,12 @@ export function App(): JSX.Element {
   return (
     <div className={`popover-root ${isMiniMode ? "mini-mode" : ""}`}>
       <section className={`popover-card ${isMiniMode ? "mini-shell" : ""}`}>
-        <div className="drag-strip" data-tauri-drag-region>
+        <div className="drag-strip">
           <span />
         </div>
 
         <header className="popover-header">
-          <div className="popover-brand" data-tauri-drag-region>
+          <div className="popover-brand">
             <img src="/icons/cursor-48.png" alt="Cursor" />
             <div>
               <h1>Cursor Usage</h1>

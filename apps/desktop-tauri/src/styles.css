@@ -95,7 +95,7 @@ body {
   justify-content: center;
   align-items: center;
   height: 14px;
-  cursor: move;
+  cursor: default;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -118,15 +118,15 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  cursor: move;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  cursor: default;
+  user-select: auto;
+  -webkit-user-select: auto;
 }
 
 .lang-switch {
