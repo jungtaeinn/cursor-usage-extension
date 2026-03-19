@@ -1,9 +1,9 @@
 {
   "name": "cursor-usage-extension-monorepo",
   "author": "jungtaeinn",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0",
-  "description": "Cursor Usage Extension v1.0.0 by TAEINN",
+  "description": "Cursor Usage Extension v1.1.0 by TAEINN",
   "packageManager": "pnpm@10.30.0",
   "scripts": {
     "build": "pnpm -r build",
