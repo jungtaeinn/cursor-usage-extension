@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.1 - 2026-03-20
+
+### Changed
+
+- 상단 브랜드 타이틀을 `Cursor Usage`에서 `Cursor Teams Usage`로 변경 (Desktop/Chrome Options/Popup)
+- 피드백(성공/오류) 메시지 자동 숨김 시간을 `10초 -> 5초`로 조정
+- 메시지가 사라져도 피드백 영역 높이를 유지하도록 UI 레이아웃 안정화
+- 긴 타이틀 대응을 위해 헤더 브랜드 텍스트를 ellipsis 기반으로 정리
+
 ## v1.1.0 - 2026-03-20
 
 ### Added

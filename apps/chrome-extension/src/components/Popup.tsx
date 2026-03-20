@@ -18,8 +18,9 @@ type PopupState = {
 
 type UiLanguage = "ko" | "en";
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 const UI_LANGUAGE_STORAGE_KEY = "cue_ui_language_chrome";
+const FEEDBACK_AUTO_HIDE_MS = 5_000;
 
 const I18N = {
   ko: {
@@ -152,6 +153,18 @@ export function Popup(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    if (!feedback) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setFeedback(null);
+    }, FEEDBACK_AUTO_HIDE_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [feedback]);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = state.config.theme;
   }, [state.config.theme]);
 
@@ -168,6 +181,9 @@ export function Popup(): JSX.Element {
     summary.myLimitUsd !== null && summary.mySpendUsd !== null
       ? Math.max(0, summary.myLimitUsd - summary.mySpendUsd)
       : null;
+  const lastSyncedAtLabel = state.snapshot.lastSyncAt
+    ? new Date(state.snapshot.lastSyncAt).toLocaleTimeString()
+    : "-";
 
   const openDashboard = async () => {
     const url = chrome.runtime.getURL("options.html");
@@ -193,7 +209,7 @@ export function Popup(): JSX.Element {
         <div className="brand">
           <img src={chrome.runtime.getURL("icons/cursor-48.png")} alt="Cursor" />
           <div>
-            <h1>Cursor Usage</h1>
+            <h1>Cursor Teams Usage</h1>
             <p>{`v${APP_VERSION} by TAEINN`}</p>
           </div>
         </div>
@@ -249,12 +265,11 @@ export function Popup(): JSX.Element {
           {i18n.openDashboard}
         </button>
         <p className="muted popup-sync-time">
-          {i18n.autoSync} ·{" "}
-          {state.snapshot.lastSyncAt ? new Date(state.snapshot.lastSyncAt).toLocaleTimeString() : "-"}
+          {`${i18n.autoSync} (${lastSyncedAtLabel})`}
         </p>
       </div>
 
-      {feedback ? <p className="options-feedback">{feedback}</p> : null}
+      <p className={`options-feedback ${feedback ? "" : "is-empty"}`}>{feedback ?? ""}</p>
     </div>
   );
 }

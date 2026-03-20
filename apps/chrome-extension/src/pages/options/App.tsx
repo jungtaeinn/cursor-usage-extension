@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_CONFIG,
   EMPTY_SNAPSHOT,
+  formatKoreanDisplayName,
   formatUsdWithApproxKrw,
   getUsageSummary,
   isMockApiKey,
   percent,
+  resolveMemberSpendUsd,
   type AppConfig,
   type SetUserSpendLimitRequest,
   type SyncSnapshot
@@ -34,7 +36,8 @@ type ValidateApiKeyResponse = {
 
 const UI_LANGUAGE_STORAGE_KEY = "cue_ui_language_chrome";
 const TABS: OptionsTabKey[] = ["overview", "team", "settings"];
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
+const FEEDBACK_AUTO_HIDE_MS = 5_000;
 
 const I18N = {
   ko: {
@@ -59,6 +62,9 @@ const I18N = {
     myUsagePair: "개인 사용/한도",
     teamUsagePair: "팀 사용/예산",
     myNoData: "개인 데이터 없음",
+    myEmailNotConfigured: "설정 탭에서 내 이메일을 먼저 입력해주세요.",
+    myEmailAutoSet: "개인 사용률 조회를 위해 내 이메일을 자동 설정했습니다.",
+    myLimitNotConfigured: "개인 한도 미설정",
     teamNoData: "팀 데이터 없음",
     usageEvents24h: "최근 24시간 Usage Events",
     usageEventsNoData: "Usage Events 데이터 없음",
@@ -138,6 +144,9 @@ const I18N = {
     myUsagePair: "My Spend / Limit",
     teamUsagePair: "Team Spend / Budget",
     myNoData: "No personal data",
+    myEmailNotConfigured: "Set your My Email in Settings first.",
+    myEmailAutoSet: "Your My Email was auto-set for personal usage tracking.",
+    myLimitNotConfigured: "Personal limit not set",
     teamNoData: "No team data",
     usageEvents24h: "Usage Events (24h)",
     usageEventsNoData: "No usage events data",
@@ -429,6 +438,30 @@ export function OptionsApp(): JSX.Element {
     }
   }, [language]);
 
+  useEffect(() => {
+    if (!feedback) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setFeedback(null);
+    }, FEEDBACK_AUTO_HIDE_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [feedback]);
+
+  useEffect(() => {
+    if (!keyValidation || (validatingKey && keyValidation.tone === "info")) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setKeyValidation(null);
+    }, FEEDBACK_AUTO_HIDE_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [keyValidation, validatingKey]);
+
   const summary = useMemo(
     () => getUsageSummary(snapshot.spend, config.myEmail, config.teamBudgetUsd),
     [snapshot.spend, config.myEmail, config.teamBudgetUsd]
@@ -440,12 +473,15 @@ export function OptionsApp(): JSX.Element {
   const topMembers = useMemo(() => {
     return (snapshot.spend?.teamMemberSpend ?? [])
       .slice()
-      .sort((a, b) => b.overallSpendCents - a.overallSpendCents)
-      .slice(0, 8)
+      .sort((a, b) => {
+        const left = resolveMemberSpendUsd(a) ?? -1;
+        const right = resolveMemberSpendUsd(b) ?? -1;
+        return right - left;
+      })
       .map((member) => ({
         email: member.email,
-        name: member.name ?? member.email,
-        usd: member.overallSpendCents / 100
+        name: member.name ? formatKoreanDisplayName(member.name) : member.email,
+        usd: resolveMemberSpendUsd(member)
       }));
   }, [snapshot.spend]);
 
@@ -457,9 +493,19 @@ export function OptionsApp(): JSX.Element {
     const windowStart = Date.now() - 24 * 60 * 60 * 1000;
     const recent = rows.filter((row) => row.timestamp >= windowStart);
     const target = recent.length > 0 ? recent : rows;
-    const chargedUsd = target.reduce((acc, row) => acc + row.chargedCents, 0) / 100;
-    const inputTokens = target.reduce((acc, row) => acc + (row.inputTokens ?? 0), 0);
-    const outputTokens = target.reduce((acc, row) => acc + (row.outputTokens ?? 0), 0);
+    const chargedUsd =
+      target.reduce(
+        (acc, row) => acc + (Number.isFinite(row.chargedCents) ? row.chargedCents : 0),
+        0
+      ) / 100;
+    const inputTokens = target.reduce(
+      (acc, row) => acc + (Number.isFinite(row.inputTokens) ? (row.inputTokens ?? 0) : 0),
+      0
+    );
+    const outputTokens = target.reduce(
+      (acc, row) => acc + (Number.isFinite(row.outputTokens) ? (row.outputTokens ?? 0) : 0),
+      0
+    );
     return {
       eventCount: target.length,
       chargedUsd,
@@ -469,6 +515,9 @@ export function OptionsApp(): JSX.Element {
   }, [snapshot.usageEvents]);
 
   const tabIndex = Math.max(0, TABS.findIndex((item) => item === tab));
+  const lastSyncedAtLabel = snapshot.lastSyncAt
+    ? new Date(snapshot.lastSyncAt).toLocaleTimeString()
+    : "-";
 
   const onManualSync = async () => {
     setSyncing(true);
@@ -530,7 +579,23 @@ export function OptionsApp(): JSX.Element {
         type: "set-user-spend-limit",
         payload: request
       });
-      setFeedback(result.message ?? i18n.limitApplySuccess);
+      const baseMessage = result.message ?? i18n.limitApplySuccess;
+      const normalizedRequestEmail = request.userEmail.trim();
+      if (!config.myEmail.trim() && normalizedRequestEmail) {
+        const updated = await sendMessage<StateMessagePayload>({
+          type: "save-config",
+          payload: {
+            ...config,
+            myEmail: normalizedRequestEmail
+          }
+        });
+        setConfig(updated.config);
+        setDraft(updated.config);
+        setSnapshot(updated.snapshot);
+        setFeedback(`${baseMessage} (${i18n.myEmailAutoSet})`);
+      } else {
+        setFeedback(baseMessage);
+      }
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : i18n.limitApplyFailed);
     }
@@ -626,7 +691,7 @@ export function OptionsApp(): JSX.Element {
           <div className="brand">
             <img src={chrome.runtime.getURL("icons/cursor-48.png")} alt="Cursor" />
             <div>
-              <h1>Cursor Usage</h1>
+              <h1>Cursor Teams Usage</h1>
               <p>{`v${APP_VERSION} by TAEINN`}</p>
             </div>
           </div>
@@ -652,7 +717,7 @@ export function OptionsApp(): JSX.Element {
         </header>
 
         {snapshot.enterpriseRestricted ? <p className="options-feedback">{i18n.enterpriseBanner}</p> : null}
-        {feedback ? <p className="options-feedback">{feedback}</p> : null}
+        <p className={`options-feedback ${feedback ? "" : "is-empty"}`}>{feedback ?? ""}</p>
 
         <nav className="options-tabs">
           <span className="tab-indicator" style={{ transform: `translateX(${tabIndex * 100}%)` }} />
@@ -679,9 +744,13 @@ export function OptionsApp(): JSX.Element {
                   percent={myPercent}
                   tone="primary"
                   subtitle={
-                    summary.mySpendUsd === null || summary.myLimitUsd === null
-                      ? i18n.myNoData
-                      : `${formatUsdWithApproxKrw(summary.mySpendUsd, snapshot.fxRate?.usdToKrw ?? null)} / ${formatUsdWithApproxKrw(summary.myLimitUsd, snapshot.fxRate?.usdToKrw ?? null)}`
+                    summary.mySpendUsd === null
+                      ? config.myEmail.trim()
+                        ? i18n.myNoData
+                        : i18n.myEmailNotConfigured
+                      : summary.myLimitUsd === null
+                        ? `${formatUsdWithApproxKrw(summary.mySpendUsd, snapshot.fxRate?.usdToKrw ?? null)} / ${i18n.myLimitNotConfigured}`
+                        : `${formatUsdWithApproxKrw(summary.mySpendUsd, snapshot.fxRate?.usdToKrw ?? null)} / ${formatUsdWithApproxKrw(summary.myLimitUsd, snapshot.fxRate?.usdToKrw ?? null)}`
                   }
                 />
                 <RingGauge
@@ -732,7 +801,11 @@ export function OptionsApp(): JSX.Element {
                         <strong>{member.name}</strong>
                         <p>{member.email}</p>
                       </div>
-                      <span>{formatUsdWithApproxKrw(member.usd, snapshot.fxRate?.usdToKrw ?? null)}</span>
+                      <span>
+                        {member.usd === null
+                          ? "-"
+                          : formatUsdWithApproxKrw(member.usd, snapshot.fxRate?.usdToKrw ?? null)}
+                      </span>
                     </article>
                   ))
                 )}
@@ -936,8 +1009,7 @@ export function OptionsApp(): JSX.Element {
         </section>
 
         <footer className="options-footer">
-          <span>{i18n.autoSync}</span>
-          <span>{snapshot.lastSyncAt ? new Date(snapshot.lastSyncAt).toLocaleString() : "-"}</span>
+          <span>{`${i18n.autoSync} (${lastSyncedAtLabel})`}</span>
         </footer>
       </section>
     </div>

@@ -14,6 +14,9 @@
   --warn: #d34a5c;
   --ring-track: #d8e5f5;
   --shadow: 0 22px 36px rgba(17, 34, 57, 0.2);
+  --scroll-thumb: rgba(17, 130, 255, 0.28);
+  --scroll-thumb-hover: rgba(17, 130, 255, 0.48);
+  --scroll-track: rgba(35, 79, 137, 0.08);
 }
 
 html[data-theme="light"] {
@@ -43,6 +46,9 @@ html[data-theme="dark"] {
   --warn: #ff7785;
   --ring-track: #324760;
   --shadow: 0 22px 36px rgba(0, 0, 0, 0.45);
+  --scroll-thumb: rgba(94, 168, 255, 0.34);
+  --scroll-thumb-hover: rgba(94, 168, 255, 0.56);
+  --scroll-track: rgba(124, 160, 219, 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -59,6 +65,9 @@ html[data-theme="dark"] {
     --warn: #ff7785;
     --ring-track: #324760;
     --shadow: 0 22px 36px rgba(0, 0, 0, 0.45);
+    --scroll-thumb: rgba(94, 168, 255, 0.34);
+    --scroll-thumb-hover: rgba(94, 168, 255, 0.56);
+    --scroll-track: rgba(124, 160, 219, 0.1);
   }
 }
 
@@ -140,6 +149,11 @@ body.page-popup #root {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+
+.brand > div {
+  min-width: 0;
 }
 
 .brand img {
@@ -150,10 +164,13 @@ body.page-popup #root {
 
 .brand h1 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.15;
   font-weight: 700;
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .brand p {
@@ -223,9 +240,18 @@ body.page-popup #root {
   border: 1px solid color-mix(in srgb, var(--warn), transparent 58%);
   background: color-mix(in srgb, var(--warn), transparent 88%);
   border-radius: 10px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
   padding: 7px 10px;
   font-size: 12px;
   font-weight: 500;
+}
+
+.options-feedback.is-empty {
+  visibility: hidden;
+  border-color: transparent;
+  background: transparent;
 }
 
 .options-tabs {
@@ -316,6 +342,44 @@ body.page-popup #root {
 
 .save-btn {
   width: 100%;
+}
+
+/* Keep in-panel scrollbars subtle and aligned with the card tone. */
+.options-shell,
+.content-panel,
+.settings-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+
+.options-shell ::-webkit-scrollbar,
+.content-panel::-webkit-scrollbar,
+.settings-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.options-shell ::-webkit-scrollbar-track,
+.content-panel::-webkit-scrollbar-track,
+.settings-scroll::-webkit-scrollbar-track {
+  background: var(--scroll-track) !important;
+  border-radius: 999px;
+}
+
+.options-shell ::-webkit-scrollbar-thumb,
+.content-panel::-webkit-scrollbar-thumb,
+.settings-scroll::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb) !important;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--card-strong), transparent 4%);
+  background-clip: padding-box;
+}
+
+.options-shell ::-webkit-scrollbar-thumb:hover,
+.content-panel::-webkit-scrollbar-thumb:hover,
+.settings-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover) !important;
+  background-clip: padding-box;
 }
 
 .ring-grid {

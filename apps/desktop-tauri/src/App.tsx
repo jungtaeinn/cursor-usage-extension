@@ -9,9 +9,11 @@ import {
   EMPTY_SNAPSHOT,
   SyncService,
   formatUsdWithApproxKrw,
+  formatKoreanDisplayName,
   getUsageSummary,
   isMockApiKey,
   percent,
+  resolveMemberSpendUsd,
   type AppConfig,
   type SetUserSpendLimitRequest,
   type SyncSnapshot
@@ -19,6 +21,12 @@ import {
 
 import { DesktopStorageAdapter } from "./storage";
 import { DAILY_USAGE_SYNC_MINUTES, SPEND_SYNC_MINUTES } from "./syncPolicy";
+import {
+  appendAuthValidationLog,
+  classifyAuthValidationError,
+  createTraceId,
+  fingerprintApiKey
+} from "./authDebug";
 
 type TabKey = "overview" | "team" | "settings";
 
@@ -28,11 +36,13 @@ type WindowMode = "max" | "mini";
 const UI_LANGUAGE_STORAGE_KEY = "cue_ui_language";
 const WINDOW_MODE_STORAGE_KEY = "cue_window_mode";
 const TABS: TabKey[] = ["overview", "team", "settings"];
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 const WINDOW_WIDTH = 430;
 const MAX_WINDOW_HEIGHT = 600;
-const MINI_WINDOW_HEIGHT = 224;
 const MINI_WINDOW_HEIGHT_WITH_FEEDBACK = 264;
+const CURSOR_API_DEV_PROXY_BASE_URL = "/cursor-api";
+const AUTH_VALIDATE_ENDPOINT = "/teams/spend";
+const FEEDBACK_AUTO_HIDE_MS = 5_000;
 
 const I18N = {
   ko: {
@@ -65,11 +75,25 @@ const I18N = {
     myUsagePair: "개인 사용/한도",
     teamUsagePair: "팀 사용/예산",
     myNoData: "개인 데이터 없음",
+    myEmailNotConfigured: "설정 탭에서 내 이메일을 먼저 입력해주세요.",
+    myEmailAutoSet: "개인 사용률 조회를 위해 내 이메일을 자동 설정했습니다.",
+    myLimitNotConfigured: "개인 한도 미설정",
     teamNoData: "팀 데이터 없음",
     usageEvents24h: "최근 24시간 Usage Events",
     usageEventsNoData: "Usage Events 데이터 없음",
+    usageEventsApiFailed: "Usage Events API 응답 오류로 데이터를 불러오지 못했습니다.",
     usageEventsCount: "이벤트 수",
     usageEventsTokens: "토큰 (입력/출력)",
+    tokensApiFailed: "토큰 데이터 조회 실패",
+    myUsageInfo:
+      "내 이메일과 같은 계정이 이번 달(현재 결제 주기)에 사용한 금액입니다. 퍼센트는 내 한도 대비 현재 사용 비율입니다.",
+    teamUsageInfo:
+      "팀원 전체가 이번 달(현재 결제 주기)에 사용한 금액의 합계입니다. 퍼센트는 설정한 팀 예산 대비 현재 사용 비율입니다.",
+    usageEventsInfo:
+      "지난 24시간 동안 팀에서 발생한 AI 사용 기록의 비용 합계입니다. 요청 1건을 이벤트 1개로 보고, 그 비용을 모두 더해 보여줍니다.",
+    tokensInfo:
+      "지난 24시간 이벤트 기준 토큰 합계입니다. 왼쪽은 입력 토큰, 오른쪽은 출력 토큰입니다. 데이터가 없거나 조회에 실패하면 '-'로 표시됩니다.",
+    infoClose: "닫기",
     myLimit: "개인 한도",
     teamBudget: "팀 예산",
     teamNoRows: "팀 데이터가 없습니다.",
@@ -152,11 +176,25 @@ const I18N = {
     myUsagePair: "My Spend / Limit",
     teamUsagePair: "Team Spend / Budget",
     myNoData: "No personal data",
+    myEmailNotConfigured: "Set your My Email in Settings first.",
+    myEmailAutoSet: "Your My Email was auto-set for personal usage tracking.",
+    myLimitNotConfigured: "Personal limit not set",
     teamNoData: "No team data",
     usageEvents24h: "Usage Events (24h)",
     usageEventsNoData: "No usage events data",
+    usageEventsApiFailed: "Could not load usage events due to API response error.",
     usageEventsCount: "Events",
     usageEventsTokens: "Tokens (in/out)",
+    tokensApiFailed: "Token data unavailable",
+    myUsageInfo:
+      "How much your account (matched by My Email) has spent in the current billing cycle. Percent means how much of your personal limit is used.",
+    teamUsageInfo:
+      "Total spend of all team members in the current billing cycle. Percent means how much of your configured team budget is used.",
+    usageEventsInfo:
+      "Total cost of AI usage records from the last 24 hours. Each request is treated as one event, and this card shows the sum of their charges.",
+    tokensInfo:
+      "Token totals from the last 24h events. Left is input tokens, right is output tokens. If data is unavailable or loading fails, this shows '-'.",
+    infoClose: "Close",
     myLimit: "My Limit",
     teamBudget: "Team Budget",
     teamNoRows: "No team data available.",
@@ -241,16 +279,11 @@ function isTauriRuntime(): boolean {
   return Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 }
 
-async function applyWindowSize(mode: WindowMode, hasFeedback: boolean): Promise<void> {
+async function applyWindowSize(mode: WindowMode): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  const height =
-    mode === "mini"
-      ? hasFeedback
-        ? MINI_WINDOW_HEIGHT_WITH_FEEDBACK
-        : MINI_WINDOW_HEIGHT
-      : MAX_WINDOW_HEIGHT;
+  const height = mode === "mini" ? MINI_WINDOW_HEIGHT_WITH_FEEDBACK : MAX_WINDOW_HEIGHT;
   try {
     await invoke("set_window_mode", { mode, height });
     return;
@@ -298,35 +331,72 @@ function getRemainingTone(
   return "tone-red";
 }
 
+function getUsageTone(
+  value: number | null
+): "tone-muted" | "tone-blue" | "tone-green" | "tone-orange" | "tone-red" {
+  if (value === null) {
+    return "tone-muted";
+  }
+  if (value >= 90) {
+    return "tone-red";
+  }
+  if (value >= 70) {
+    return "tone-orange";
+  }
+  if (value >= 40) {
+    return "tone-blue";
+  }
+  return "tone-green";
+}
+
+function InfoHint(props: {
+  label: string;
+  onOpen: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="info-hint"
+      aria-label={`${props.label} info`}
+      title={props.label}
+      onClick={props.onOpen}
+    >
+      i
+    </button>
+  );
+}
+
 function RingGauge(props: {
   label: string;
   percent: number | null;
   subtitle: string;
-  tone: "primary" | "success";
+  onInfoClick: () => void;
 }): JSX.Element {
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
   const safePercent = clamp(props.percent);
   const dashOffset = circumference - (safePercent / 100) * circumference;
+  const usageTone = getUsageTone(props.percent);
 
   return (
     <article className="ring-card">
       <svg className="ring-svg" width="120" height="120" viewBox="0 0 120 120">
         <circle className="ring-track" cx="60" cy="60" r={radius} />
         <circle
-          className={`ring-progress ${props.tone}`}
+          className={`ring-progress ${usageTone}`}
           cx="60"
           cy="60"
           r={radius}
           strokeDasharray={circumference}
           strokeDashoffset={dashOffset}
         />
-        <text x="50%" y="50%" textAnchor="middle" dy="0.3em" className="ring-text">
+        <text x="50%" y="50%" textAnchor="middle" dy="0.3em" className={`ring-text ${usageTone}`}>
           {props.percent === null ? "--" : `${safePercent.toFixed(0)}%`}
         </text>
       </svg>
       <p className="ring-label">{props.label}</p>
       <p className="ring-subtitle">{props.subtitle}</p>
+      <InfoHint label={props.label} onOpen={props.onInfoClick} />
     </article>
   );
 }
@@ -416,6 +486,7 @@ export function App(): JSX.Element {
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [activeInfo, setActiveInfo] = useState<{ label: string; content: string } | null>(null);
   const [validatingKey, setValidatingKey] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [keyValidation, setKeyValidation] = useState<{
@@ -426,8 +497,15 @@ export function App(): JSX.Element {
   const [adminLimit, setAdminLimit] = useState("");
 
   const storage = useMemo(() => new DesktopStorageAdapter(), []);
-  const syncService = useMemo(() => new SyncService({ storage }), [storage]);
+  const cursorApiBaseUrl = import.meta.env.DEV ? CURSOR_API_DEV_PROXY_BASE_URL : undefined;
+  const syncService = useMemo(
+    () => new SyncService({ storage, cursorApiBaseUrl }),
+    [storage, cursorApiBaseUrl]
+  );
   const i18n = I18N[language];
+
+  const createCursorClient = (apiKey: string): CursorApiClient =>
+    new CursorApiClient(apiKey, { baseUrl: cursorApiBaseUrl });
 
   useEffect(() => {
     let disposed = false;
@@ -479,15 +557,39 @@ export function App(): JSX.Element {
   }, [language]);
 
   useEffect(() => {
+    if (!feedback) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setFeedback(null);
+    }, FEEDBACK_AUTO_HIDE_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [feedback]);
+
+  useEffect(() => {
+    if (!keyValidation || (validatingKey && keyValidation.tone === "info")) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setKeyValidation(null);
+    }, FEEDBACK_AUTO_HIDE_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [keyValidation, validatingKey]);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(WINDOW_MODE_STORAGE_KEY, windowMode);
     } catch {
       // ignore storage write errors
     }
-    void applyWindowSize(windowMode, Boolean(feedback)).catch(() => {
+    void applyWindowSize(windowMode).catch(() => {
       // ignore window resize errors in browser-only preview mode
     });
-  }, [windowMode, feedback]);
+  }, [windowMode]);
 
   const summary = useMemo(
     () => getUsageSummary(snapshot.spend, config.myEmail, config.teamBudgetUsd),
@@ -500,12 +602,15 @@ export function App(): JSX.Element {
   const topMembers = useMemo(() => {
     return (snapshot.spend?.teamMemberSpend ?? [])
       .slice()
-      .sort((a, b) => b.overallSpendCents - a.overallSpendCents)
-      .slice(0, 4)
+      .sort((a, b) => {
+        const left = resolveMemberSpendUsd(a) ?? -1;
+        const right = resolveMemberSpendUsd(b) ?? -1;
+        return right - left;
+      })
       .map((member) => ({
         email: member.email,
-        name: member.name ?? member.email,
-        usd: member.overallSpendCents / 100
+        name: member.name ? formatKoreanDisplayName(member.name) : member.email,
+        usd: resolveMemberSpendUsd(member)
       }));
   }, [snapshot.spend]);
 
@@ -517,9 +622,19 @@ export function App(): JSX.Element {
     const windowStart = Date.now() - 24 * 60 * 60 * 1000;
     const recent = rows.filter((row) => row.timestamp >= windowStart);
     const target = recent.length > 0 ? recent : rows;
-    const chargedUsd = target.reduce((acc, row) => acc + row.chargedCents, 0) / 100;
-    const inputTokens = target.reduce((acc, row) => acc + (row.inputTokens ?? 0), 0);
-    const outputTokens = target.reduce((acc, row) => acc + (row.outputTokens ?? 0), 0);
+    const chargedUsd =
+      target.reduce(
+        (acc, row) => acc + (Number.isFinite(row.chargedCents) ? row.chargedCents : 0),
+        0
+      ) / 100;
+    const inputTokens = target.reduce(
+      (acc, row) => acc + (Number.isFinite(row.inputTokens) ? (row.inputTokens ?? 0) : 0),
+      0
+    );
+    const outputTokens = target.reduce(
+      (acc, row) => acc + (Number.isFinite(row.outputTokens) ? (row.outputTokens ?? 0) : 0),
+      0
+    );
     return {
       eventCount: target.length,
       chargedUsd,
@@ -527,9 +642,13 @@ export function App(): JSX.Element {
       outputTokens
     };
   }, [snapshot.usageEvents]);
+  const usageEventsError = snapshot.errors.usageEvents ?? null;
 
   const tabIndex = Math.max(0, TABS.findIndex((item) => item === tab));
   const isMiniMode = windowMode === "mini";
+  const lastSyncedAtLabel = snapshot.lastSyncAt
+    ? new Date(snapshot.lastSyncAt).toLocaleTimeString()
+    : "-";
   const safeMyPercent = clamp(myPercent);
   const hasMyUsageData = summary.myLimitUsd !== null && summary.mySpendUsd !== null;
   const remainingMyUsd =
@@ -604,8 +723,25 @@ export function App(): JSX.Element {
     try {
       const result = isMockApiKey(config.apiKey)
         ? createMockSetUserSpendLimitResponse(request)
-        : await new CursorApiClient(config.apiKey).setUserSpendLimit(request);
-      setFeedback(result.message ?? i18n.limitApplySuccess);
+        : await createCursorClient(config.apiKey).setUserSpendLimit(request);
+      const baseMessage = result.message ?? i18n.limitApplySuccess;
+      const normalizedRequestEmail = request.userEmail.trim();
+      if (!config.myEmail.trim() && normalizedRequestEmail) {
+        const nextConfig = {
+          ...config,
+          myEmail: normalizedRequestEmail
+        };
+        await storage.setConfig(nextConfig);
+        setConfig(nextConfig);
+        setDraft((prev) => ({
+          ...prev,
+          myEmail: normalizedRequestEmail
+        }));
+        void syncService.syncSpend("manual");
+        setFeedback(`${baseMessage} (${i18n.myEmailAutoSet})`);
+      } else {
+        setFeedback(baseMessage);
+      }
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : i18n.limitApplyFailed);
     }
@@ -629,45 +765,86 @@ export function App(): JSX.Element {
       return;
     }
 
+    const traceId = createTraceId();
+    const apiKeyFingerprint = fingerprintApiKey(apiKey);
+    const startedAt = Date.now();
+    const baseUrl = cursorApiBaseUrl ?? "https://api.cursor.com";
+
     setValidatingKey(true);
     setKeyValidation({
       tone: "info",
       message: i18n.keyChecking
     });
+    appendAuthValidationLog({
+      traceId,
+      stage: "start",
+      level: "info",
+      endpoint: AUTH_VALIDATE_ENDPOINT,
+      method: "POST",
+      baseUrl,
+      apiKeyFingerprint
+    });
 
     try {
-      await new CursorApiClient(apiKey).postSpend({ page: 1, pageSize: 1 });
+      await createCursorClient(apiKey).postSpend({ page: 1, pageSize: 1 });
+      appendAuthValidationLog({
+        traceId,
+        stage: "success",
+        level: "info",
+        endpoint: AUTH_VALIDATE_ENDPOINT,
+        method: "POST",
+        baseUrl,
+        durationMs: Date.now() - startedAt,
+        httpStatus: 200,
+        apiKeyFingerprint
+      });
       setKeyValidation({
         tone: "success",
         message: i18n.keyValid
       });
     } catch (error) {
+      const classified = classifyAuthValidationError(error);
+      appendAuthValidationLog({
+        traceId,
+        stage: "failure",
+        level: "error",
+        endpoint: AUTH_VALIDATE_ENDPOINT,
+        method: "POST",
+        baseUrl,
+        durationMs: Date.now() - startedAt,
+        httpStatus: classified.status,
+        retryable: classified.retryable,
+        errorKind: classified.kind,
+        errorMessage: classified.message,
+        apiKeyFingerprint
+      });
+
       if (error instanceof CursorApiError) {
         if (error.status === 401) {
           setKeyValidation({
             tone: "error",
-            message: i18n.keyInvalid
+            message: `${i18n.keyInvalid} (trace: ${traceId})`
           });
         } else if (error.status === 403) {
           setKeyValidation({
             tone: "warn",
-            message: i18n.keyNoEnterprise
+            message: `${i18n.keyNoEnterprise} (trace: ${traceId})`
           });
         } else if (error.status === 429) {
           setKeyValidation({
             tone: "warn",
-            message: i18n.keyRateLimited
+            message: `${i18n.keyRateLimited} (trace: ${traceId})`
           });
         } else {
           setKeyValidation({
             tone: "error",
-            message: `${i18n.keyFailedWithStatus} (${error.status}): ${error.message}`
+            message: `${i18n.keyFailedWithStatus} (${error.status}): ${error.message} (trace: ${traceId})`
           });
         }
       } else {
         setKeyValidation({
           tone: "error",
-          message: error instanceof Error ? error.message : i18n.keyFailed
+          message: `${error instanceof Error ? error.message : i18n.keyFailed} (trace: ${traceId})`
         });
       }
     } finally {
@@ -704,7 +881,7 @@ export function App(): JSX.Element {
           <div className="popover-brand">
             <img src="/icons/cursor-48.png" alt="Cursor" />
             <div>
-              <h1>Cursor Usage</h1>
+              <h1>Cursor Teams Usage</h1>
               <p>{`v${APP_VERSION} by TAEINN`}</p>
             </div>
           </div>
@@ -752,7 +929,9 @@ export function App(): JSX.Element {
           </div>
         </header>
 
-        {feedback ? <p className={`popover-feedback ${isMiniMode ? "mini-feedback" : ""}`}>{feedback}</p> : null}
+        <p className={`popover-feedback ${isMiniMode ? "mini-feedback" : ""} ${feedback ? "" : "is-empty"}`}>
+          {feedback ?? ""}
+        </p>
 
         {isMiniMode ? (
           <>
@@ -793,8 +972,7 @@ export function App(): JSX.Element {
             </section>
 
             <footer className="popover-footer mini-footer">
-              <span>{i18n.autoSync}</span>
-              <span>{snapshot.lastSyncAt ? new Date(snapshot.lastSyncAt).toLocaleTimeString() : "-"}</span>
+              <span>{`${i18n.autoSync} (${lastSyncedAtLabel})`}</span>
             </footer>
           </>
         ) : (
@@ -819,17 +997,31 @@ export function App(): JSX.Element {
                     <RingGauge
                       label={i18n.myUsage}
                       percent={myPercent}
-                      tone="primary"
+                      onInfoClick={() =>
+                        setActiveInfo({
+                          label: i18n.myUsage,
+                          content: i18n.myUsageInfo
+                        })
+                      }
                       subtitle={
-                        summary.mySpendUsd === null || summary.myLimitUsd === null
-                          ? i18n.myNoData
-                          : `${formatUsdWithApproxKrw(summary.mySpendUsd, snapshot.fxRate?.usdToKrw ?? null)} / ${formatUsdWithApproxKrw(summary.myLimitUsd, snapshot.fxRate?.usdToKrw ?? null)}`
+                        summary.mySpendUsd === null
+                          ? config.myEmail.trim()
+                            ? i18n.myNoData
+                            : i18n.myEmailNotConfigured
+                          : summary.myLimitUsd === null
+                            ? `${formatUsdWithApproxKrw(summary.mySpendUsd, snapshot.fxRate?.usdToKrw ?? null)} / ${i18n.myLimitNotConfigured}`
+                            : `${formatUsdWithApproxKrw(summary.mySpendUsd, snapshot.fxRate?.usdToKrw ?? null)} / ${formatUsdWithApproxKrw(summary.myLimitUsd, snapshot.fxRate?.usdToKrw ?? null)}`
                       }
                     />
                     <RingGauge
                       label={i18n.teamUsage}
                       percent={teamPercent}
-                      tone="success"
+                      onInfoClick={() =>
+                        setActiveInfo({
+                          label: i18n.teamUsage,
+                          content: i18n.teamUsageInfo
+                        })
+                      }
                       subtitle={
                         summary.teamSpendUsd === null || summary.teamBudgetUsd === null
                           ? i18n.teamNoData
@@ -838,24 +1030,46 @@ export function App(): JSX.Element {
                     />
                   </div>
                   <div className="mini-metrics">
-                    <div>
+                    <div className="metric-tile">
                       <strong>{i18n.usageEvents24h}</strong>
                       <p>
                         {usageEvents24h
                           ? formatUsdWithApproxKrw(usageEvents24h.chargedUsd, snapshot.fxRate?.usdToKrw ?? null)
-                          : i18n.usageEventsNoData}
+                          : usageEventsError
+                            ? i18n.usageEventsApiFailed
+                            : i18n.usageEventsNoData}
                       </p>
                       <small>
                         {i18n.usageEventsCount}: {usageEvents24h ? usageEvents24h.eventCount.toLocaleString() : "-"}
                       </small>
+                      <InfoHint
+                        label={i18n.usageEvents24h}
+                        onOpen={() =>
+                          setActiveInfo({
+                            label: i18n.usageEvents24h,
+                            content: i18n.usageEventsInfo
+                          })
+                        }
+                      />
                     </div>
-                    <div>
+                    <div className="metric-tile">
                       <strong>{i18n.usageEventsTokens}</strong>
                       <p>
                         {usageEvents24h
                           ? `${usageEvents24h.inputTokens.toLocaleString()} / ${usageEvents24h.outputTokens.toLocaleString()}`
-                          : "-"}
+                          : usageEventsError
+                            ? i18n.tokensApiFailed
+                            : "-"}
                       </p>
+                      <InfoHint
+                        label={i18n.usageEventsTokens}
+                        onOpen={() =>
+                          setActiveInfo({
+                            label: i18n.usageEventsTokens,
+                            content: i18n.tokensInfo
+                          })
+                        }
+                      />
                     </div>
                   </div>
                 </div>
@@ -873,7 +1087,11 @@ export function App(): JSX.Element {
                             <strong>{member.name}</strong>
                             <p>{member.email}</p>
                           </div>
-                          <span>{formatUsdWithApproxKrw(member.usd, snapshot.fxRate?.usdToKrw ?? null)}</span>
+                          <span>
+                            {member.usd === null
+                              ? "-"
+                              : formatUsdWithApproxKrw(member.usd, snapshot.fxRate?.usdToKrw ?? null)}
+                          </span>
                         </article>
                       ))
                     )}
@@ -1077,11 +1295,34 @@ export function App(): JSX.Element {
             </section>
 
             <footer className="popover-footer">
-              <span>{i18n.autoSync}</span>
-              <span>{snapshot.lastSyncAt ? new Date(snapshot.lastSyncAt).toLocaleTimeString() : "-"}</span>
+              <span>{`${i18n.autoSync} (${lastSyncedAtLabel})`}</span>
             </footer>
           </>
         )}
+        {activeInfo ? (
+          <div className="info-modal-backdrop" onClick={() => setActiveInfo(null)}>
+            <div
+              className="info-modal-card"
+              role="dialog"
+              aria-modal="true"
+              aria-label={activeInfo.label}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="info-modal-head">
+                <strong>{activeInfo.label}</strong>
+                <button
+                  type="button"
+                  className="info-modal-close"
+                  aria-label={i18n.infoClose}
+                  onClick={() => setActiveInfo(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <p>{activeInfo.content}</p>
+            </div>
+          </div>
+        ) : null}
       </section>
     </div>
   );

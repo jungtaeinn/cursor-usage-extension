@@ -4,7 +4,7 @@ export default defineManifest({
   manifest_version: 3,
   name: "Cursor Usage Extension",
   description: "Cursor 사용량/비용 모니터링 익스텐션",
-  version: "1.1.0",
+  version: "1.1.1",
   icons: {
     "16": "icons/cursor-16.png",
     "48": "icons/cursor-48.png",
